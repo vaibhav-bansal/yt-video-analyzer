@@ -1,7 +1,5 @@
 import { google } from "googleapis";
-import { createRequire } from "node:module";
-const require = createRequire(import.meta.url);
-const { YoutubeTranscript } = require("youtube-transcript");
+import { YoutubeTranscript } from "youtube-transcript";
 import { MAX_TRANSCRIPT_CHARS } from "./config.js";
 import type { TranscriptResult, TranscriptSegment, VideoMetadata } from "./types.js";
 
