@@ -4,13 +4,11 @@
   "description": "CLI tool to analyze YouTube videos with AI-powered summaries and credibility reports",
   "type": "module",
   "main": "dist/index.js",
-  "imports": {
-    "#youtube-transcript": "./node_modules/youtube-transcript/dist/youtube-transcript.esm.js"
-  },
   "bin": {
     "yt-analyze": "./dist/index.js"
   },
   "scripts": {
+    "postinstall": "node scripts/patch-youtube-transcript.cjs",
     "dev": "tsx src/index.ts",
     "dev:server": "tsx watch server/index.ts",
     "dev:web": "cd web && npm run dev",

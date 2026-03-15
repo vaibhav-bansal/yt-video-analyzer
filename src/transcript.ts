@@ -1,5 +1,5 @@
 import { google } from "googleapis";
-import { YoutubeTranscript } from "#youtube-transcript";
+import { YoutubeTranscript } from "youtube-transcript";
 import { MAX_TRANSCRIPT_CHARS } from "./config.js";
 import type { TranscriptResult, TranscriptSegment, VideoMetadata } from "./types.js";
 
