@@ -10,6 +10,15 @@ import type {
 
 const ANALYSIS_DIR = join(process.cwd(), "analysis");
 
+const buildFileName = (metadata: VideoMetadata): string => {
+  const timestamp = formatIST(new Date());
+  const safeTitle = metadata.title
+    .replace(/[^a-zA-Z0-9 ]/g, "")
+    .replace(/\s+/g, "-")
+    .slice(0, 60);
+  return `${timestamp}_${safeTitle}`;
+};
+
 export const saveAnalysis = (
   analysis: AnalysisResult,
   credibility: CredibilityReport,
@@ -17,15 +26,22 @@ export const saveAnalysis = (
 ): string => {
   mkdirSync(ANALYSIS_DIR, { recursive: true });
 
-  const timestamp = formatIST(new Date());
-  const safeTitle = metadata.title
-    .replace(/[^a-zA-Z0-9 ]/g, "")
-    .replace(/\s+/g, "-")
-    .slice(0, 60);
-  const fileName = `${timestamp}_${safeTitle}.md`;
-  const filePath = join(ANALYSIS_DIR, fileName);
-
+  const filePath = join(ANALYSIS_DIR, `${buildFileName(metadata)}.md`);
   const content = buildMarkdown(analysis, credibility, metadata);
+  writeFileSync(filePath, content, "utf-8");
+
+  return filePath;
+};
+
+export const saveAnalysisJson = (
+  analysis: AnalysisResult,
+  credibility: CredibilityReport,
+  metadata: VideoMetadata
+): string => {
+  mkdirSync(ANALYSIS_DIR, { recursive: true });
+
+  const filePath = join(ANALYSIS_DIR, `${buildFileName(metadata)}.json`);
+  const content = JSON.stringify({ analysis, credibility, metadata }, null, 2);
   writeFileSync(filePath, content, "utf-8");
 
   return filePath;
@@ -43,6 +59,7 @@ const buildMarkdown = (
   lines.push("");
   lines.push(`- **Channel:** ${metadata.channelName}`);
   lines.push(`- **Duration:** ${metadata.duration}`);
+  lines.push(`- **Published:** ${formatPublishedDate(metadata.publishedAt)}`);
   lines.push(`- **URL:** ${metadata.url}`);
   lines.push(`- **Analyzed:** ${new Date().toLocaleString("en-IN", { timeZone: "Asia/Kolkata", dateStyle: "full", timeStyle: "medium" })} IST`);
   lines.push("");
@@ -148,7 +165,31 @@ const buildMarkdown = (
     }
   }
 
+  // References
+  const allSources = credibility.verifiedClaims
+    .flatMap((c) => c.sources || [])
+    .filter((s) => s.url && s.title);
+
+  const uniqueSources = [...new Map(allSources.map((s) => [s.url, s])).values()];
+
+  if (uniqueSources.length > 0) {
+    lines.push("---");
+    lines.push("");
+    lines.push("## References");
+    lines.push("");
+    uniqueSources.forEach((source, i) => {
+      lines.push(`${i + 1}. [${source.title}](${source.url})`);
+    });
+    lines.push("");
+  }
+
   return lines.join("\n");
+};
+
+const formatPublishedDate = (isoDate: string): string => {
+  if (!isoDate) return "Unknown";
+  const date = new Date(isoDate);
+  return date.toLocaleDateString("en-IN", { dateStyle: "long", timeZone: "Asia/Kolkata" });
 };
 
 const formatClaimType = (type: string): string => {

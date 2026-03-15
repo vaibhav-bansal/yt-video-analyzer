@@ -6,7 +6,7 @@ import { analyzeContent, extractClaims } from "./analyzer.js";
 import type { ContentAnalysis, ClaimExtractionResult } from "./analyzer.js";
 import { assessCredibility } from "./credibility.js";
 import { createLogger } from "./logger.js";
-import { saveAnalysis } from "./output.js";
+import { saveAnalysis, saveAnalysisJson } from "./output.js";
 import type { CredibilityReport, ExtractedClaim, VerifiedClaim } from "./types.js";
 
 const main = async (): Promise<void> => {
@@ -39,8 +39,9 @@ const main = async (): Promise<void> => {
   let transcript;
   try {
     transcript = await getTranscript(videoId, config.youtubeApiKey);
+    const langLabel = transcript.transcriptLanguage === "hi" ? ", language: hi" : "";
     transcriptSpinner.succeed(
-      `Fetched transcript (${transcript.segments.length} segments)`
+      `Fetched transcript (${transcript.segments.length} segments${langLabel})`
     );
     log.stepDone("Fetch transcript and metadata", `${transcript.segments.length} segments, video: "${transcript.metadata.title}"`);
     log.info(`Video title: ${transcript.metadata.title}`);
@@ -54,34 +55,47 @@ const main = async (): Promise<void> => {
     process.exit(1);
   }
 
-  // Step 2: Run content analysis and claim extraction in parallel
-  // Use racing pattern: credibility starts as soon as claims are ready
+  // Step 2: Run content analysis and claim extraction in parallel (decoupled)
   const analysisSpinner = ora("Analyzing video content...").start();
   log.step("Parallel analysis: content + claims");
 
   const contentPromise = analyzeContent(
     transcript.formattedTranscript,
     transcript.metadata,
-    config.anthropicApiKey
-  );
+    config.anthropicApiKey,
+    transcript.transcriptLanguage
+  ).then((result) => {
+    log.stepDone("Content analysis", `${result.segments.length} segments, ${result.keyTakeaways.length} takeaways`);
+    return result;
+  }).catch((err) => {
+    log.stepFail("Content analysis", (err as Error).message);
+    return null;
+  });
 
   const claimsPromise = extractClaims(
     transcript.formattedTranscript,
     transcript.metadata,
-    config.anthropicApiKey
-  );
+    config.anthropicApiKey,
+    transcript.transcriptLanguage
+  ).then((result) => {
+    log.stepDone("Claim extraction", `${result.claims.length} claims`);
+    log.info(`Claim breakdown: ${formatClaimBreakdown(result.claims)}`);
+    return result;
+  }).catch((err) => {
+    log.stepFail("Claim extraction", (err as Error).message);
+    return null;
+  });
 
-  let content: ContentAnalysis;
-  let claimsResult: ClaimExtractionResult;
-  let credibility: CredibilityReport;
-  let reportableClaims: ExtractedClaim[];
+  // Wait for claims first -- they unlock the credibility step
+  const claimsResult = await claimsPromise;
 
-  try {
-    // Wait for claims first -- they unlock the credibility step
-    claimsResult = await claimsPromise;
-    log.stepDone("Claim extraction", `${claimsResult.claims.length} claims`);
-    log.info(`Claim breakdown: ${formatClaimBreakdown(claimsResult.claims)}`);
+  let reportableClaims: ExtractedClaim[] = [];
+  let credibility: CredibilityReport = {
+    verifiedClaims: [],
+    summary: "No claims were extracted.",
+  };
 
+  if (claimsResult) {
     analysisSpinner.text = "Claims extracted, verifying credibility...";
 
     // Filter out generally_accepted_knowledge -- not worth reporting
@@ -103,30 +117,32 @@ const main = async (): Promise<void> => {
 
     log.info(`Factual claims for verification: ${factualClaims.length}, non-factual (flagged): ${nonFactualClaims.length}`);
 
-    // Start credibility in parallel with content analysis (which may still be running)
-    const credibilityPromise = factualClaims.length > 0
-      ? assessCredibility(
+    // Start credibility (runs in parallel with content which may still be going)
+    if (factualClaims.length > 0) {
+      try {
+        credibility = await assessCredibility(
           factualClaims,
           transcript.metadata,
           config.anthropicApiKey,
           log
-        )
-      : Promise.resolve({
-          verifiedClaims: [],
-          summary: "No factual claims required verification.",
-        } as CredibilityReport);
-
-    // Await both content analysis and credibility in parallel
-    const [contentResult, credibilityResult] = await Promise.all([
-      contentPromise.then((result) => {
-        log.stepDone("Content analysis", `${result.segments.length} segments, ${result.keyTakeaways.length} takeaways`);
-        return result;
-      }),
-      credibilityPromise,
-    ]);
-
-    content = contentResult;
-    credibility = credibilityResult;
+        );
+      } catch (err) {
+        log.stepFail("Credibility assessment", (err as Error).message);
+        credibility = {
+          verifiedClaims: factualClaims.map((c) => ({
+            ...c,
+            status: "unverifiable" as const,
+            evidence: "Credibility assessment failed.",
+          })),
+          summary: "Credibility assessment encountered an error.",
+        };
+      }
+    } else {
+      credibility = {
+        verifiedClaims: [],
+        summary: "No factual claims required verification.",
+      };
+    }
 
     // Merge non-factual claims back as "not_checked"
     const nonFactualVerified: VerifiedClaim[] = nonFactualClaims.map((c) => ({
@@ -138,29 +154,52 @@ const main = async (): Promise<void> => {
       ...credibility.verifiedClaims,
       ...nonFactualVerified,
     ];
+  }
 
-    analysisSpinner.succeed(
-      `Analysis complete (${content.segments.length} segments, ${claimsResult.claims.length} claims, ${credibility.verifiedClaims.length} verified)`
-    );
-    log.stepDone("Parallel analysis", `${content.segments.length} segments, ${content.keyTakeaways.length} takeaways, ${credibility.verifiedClaims.length} claims assessed`);
-  } catch (err) {
-    analysisSpinner.fail("Analysis failed");
-    log.stepFail("Parallel analysis", (err as Error).message);
-    console.error(chalk.red((err as Error).message));
+  // Wait for content analysis (may already be done)
+  const content = await contentPromise;
+
+  if (!content && !claimsResult) {
+    analysisSpinner.fail("Both content analysis and claim extraction failed");
+    log.stepFail("Parallel analysis", "Both steps failed");
+    console.error(chalk.red("Both content analysis and claim extraction failed. Check logs for details."));
     process.exit(1);
   }
 
+  const segmentCount = content?.segments.length ?? 0;
+  const claimCount = credibility.verifiedClaims.length;
+  analysisSpinner.succeed(
+    `Analysis complete (${segmentCount} segments, ${claimCount} claims${!content ? " -- content analysis failed, partial report" : ""}${!claimsResult ? " -- claim extraction failed, partial report" : ""})`
+  );
+  log.stepDone("Parallel analysis", `${segmentCount} segments, ${claimCount} claims assessed`);
+
   const analysis = {
-    synopsis: content.synopsis,
-    segments: content.segments,
-    keyTakeaways: content.keyTakeaways,
+    synopsis: content?.synopsis || "Content analysis failed -- synopsis unavailable.",
+    segments: content?.segments || [],
+    keyTakeaways: content?.keyTakeaways || [],
     claims: reportableClaims,
   };
 
-  const analysisPath = saveAnalysis(analysis, credibility, transcript.metadata);
-  log.info(`Analysis saved to: ${analysisPath}`);
+  // Save with fallback chain: Markdown -> JSON -> stdout
+  try {
+    const analysisPath = saveAnalysis(analysis, credibility, transcript.metadata);
+    log.info(`Analysis saved to: ${analysisPath}`);
+    console.log(chalk.green(`\nAnalysis saved to: ${analysisPath}`));
+  } catch (mdErr) {
+    log.error(`Markdown save failed: ${(mdErr as Error).message}`);
+    console.error(chalk.yellow("Markdown save failed, trying JSON fallback..."));
+    try {
+      const jsonPath = saveAnalysisJson(analysis, credibility, transcript.metadata);
+      log.info(`JSON fallback saved to: ${jsonPath}`);
+      console.log(chalk.yellow(`Analysis saved as JSON: ${jsonPath}`));
+    } catch (jsonErr) {
+      log.error(`JSON save also failed: ${(jsonErr as Error).message}`);
+      console.error(chalk.yellow("JSON save also failed, printing to stdout..."));
+      console.log(JSON.stringify({ analysis, credibility, metadata: transcript.metadata }, null, 2));
+    }
+  }
+
   log.info("Analysis complete");
-  console.log(chalk.green(`\nAnalysis saved to: ${analysisPath}`));
   console.log(chalk.gray(`Log saved to: ${log.filePath}`));
 };
 

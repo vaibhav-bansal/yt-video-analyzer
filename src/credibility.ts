@@ -1,5 +1,6 @@
 import Anthropic from "@anthropic-ai/sdk";
 import { CLAUDE_MODEL, MAX_CREDIBILITY_TOKENS } from "./config.js";
+import { withRetry } from "./retry.js";
 import type {
   CredibilityReport,
   ExtractedClaim,
@@ -11,6 +12,9 @@ import type { Logger } from "./logger.js";
 
 const MAX_WEB_SEARCHES_PER_CLAIM = 3;
 const MAX_WEB_FETCHES_PER_CLAIM = 3;
+const MAX_PAUSE_TURN_CONTINUATIONS = 3;
+const CLAIM_TIMEOUT_MS = 60_000;
+const MAX_TIMEOUT_RETRIES = 3;
 const WEB_SEARCH_TOOL_TYPE = "web_search_20260209";
 const WEB_FETCH_TOOL_TYPE = "web_fetch_20260209";
 
@@ -30,7 +34,8 @@ Return a JSON object:
   "context": "original context",
   "speaker": "speaker if known",
   "status": "confirmed | contradicted | partially_true | unverifiable",
-  "evidence": "Brief explanation citing the search evidence"
+  "evidence": "Brief explanation citing the search evidence",
+  "sources": [{"url": "https://...", "title": "Source page title"}]
 }
 
 Status guidelines:
@@ -55,15 +60,42 @@ export const assessCredibility = async (
   claims: ExtractedClaim[],
   metadata: VideoMetadata,
   anthropicApiKey: string,
-  log: Logger
+  log: Logger,
+  onClaimVerified?: (index: number, claim: VerifiedClaim) => void
 ): Promise<CredibilityReport> => {
   const client = new Anthropic({ apiKey: anthropicApiKey });
 
   log.info(`Credibility assessment: ${claims.length} claims, parallel verification (max ${MAX_WEB_SEARCHES_PER_CLAIM} searches + ${MAX_WEB_FETCHES_PER_CLAIM} fetch per claim)`);
 
-  // Fan out: one API call per claim, all in parallel
+  // Fan out: one API call per claim, all in parallel, each with a timeout + retries
   const results = await Promise.allSettled(
-    claims.map((claim, i) => verifySingleClaim(client, claim, metadata, i, log))
+    claims.map(async (claim, i) => {
+      let lastError: unknown;
+      for (let attempt = 1; attempt <= MAX_TIMEOUT_RETRIES; attempt++) {
+        try {
+          const result = await withTimeout(
+            verifySingleClaim(client, claim, metadata, i, log),
+            CLAIM_TIMEOUT_MS,
+            `Claim ${i + 1} timed out after ${CLAIM_TIMEOUT_MS / 1000}s`
+          );
+          onClaimVerified?.(i, result.claim);
+          return result;
+        } catch (err) {
+          lastError = err;
+          if (attempt < MAX_TIMEOUT_RETRIES) {
+            log.info(`Claim ${i + 1}: attempt ${attempt}/${MAX_TIMEOUT_RETRIES} failed, retrying...`);
+          }
+        }
+      }
+      // All retries exhausted -- emit timeout status
+      const timeoutClaim: VerifiedClaim = {
+        ...claim,
+        status: "timeout",
+        evidence: "Verification timed out after multiple attempts.",
+      };
+      onClaimVerified?.(i, timeoutClaim);
+      throw lastError;
+    })
   );
 
   const verifiedClaims: VerifiedClaim[] = [];
@@ -80,8 +112,8 @@ export const assessCredibility = async (
       log.error(`Claim ${i + 1} verification failed: ${result.reason}`);
       verifiedClaims.push({
         ...claims[i],
-        status: "unverifiable",
-        evidence: "Verification failed due to an error.",
+        status: "timeout",
+        evidence: "Verification timed out after multiple attempts.",
       });
     }
   }
@@ -93,6 +125,33 @@ export const assessCredibility = async (
   return { verifiedClaims, summary };
 };
 
+export const retrySingleClaim = async (
+  claim: ExtractedClaim,
+  metadata: VideoMetadata,
+  anthropicApiKey: string,
+  log: Logger
+): Promise<VerifiedClaim> => {
+  const client = new Anthropic({ apiKey: anthropicApiKey });
+  const result = await withTimeout(
+    verifySingleClaim(client, claim, metadata, 0, log),
+    CLAIM_TIMEOUT_MS,
+    `Claim retry timed out after ${CLAIM_TIMEOUT_MS / 1000}s`
+  );
+  return result.claim;
+};
+
+const withTimeout = <T>(
+  promise: Promise<T>,
+  ms: number,
+  message: string
+): Promise<T> => {
+  let timer: ReturnType<typeof setTimeout>;
+  const timeout = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => reject(new Error(message)), ms);
+  });
+  return Promise.race([promise, timeout]).finally(() => clearTimeout(timer));
+};
+
 interface SingleClaimResult {
   claim: VerifiedClaim;
   inputTokens: number;
@@ -100,6 +159,18 @@ interface SingleClaimResult {
 }
 
 const verifySingleClaim = async (
+  client: Anthropic,
+  claim: ExtractedClaim,
+  metadata: VideoMetadata,
+  index: number,
+  log: Logger
+): Promise<SingleClaimResult> => {
+  return withRetry(async () => {
+    return verifySingleClaimInner(client, claim, metadata, index, log);
+  }, `Claim ${index + 1} verification`);
+};
+
+const verifySingleClaimInner = async (
   client: Anthropic,
   claim: ExtractedClaim,
   metadata: VideoMetadata,
@@ -123,6 +194,7 @@ Search the web to verify this claim. Return your assessment as JSON.`;
   let totalInputTokens = 0;
   let totalOutputTokens = 0;
   let response: Anthropic.Message;
+  let pauseTurnCount = 0;
 
   while (true) {
     const stream = client.messages.stream({
@@ -152,7 +224,12 @@ Search the web to verify this claim. Return your assessment as JSON.`;
     totalOutputTokens += response.usage.output_tokens;
 
     if (response.stop_reason === "pause_turn") {
-      log.info(`Claim ${index + 1}: pause_turn -- continuing`);
+      pauseTurnCount++;
+      if (pauseTurnCount >= MAX_PAUSE_TURN_CONTINUATIONS) {
+        log.info(`Claim ${index + 1}: pause_turn limit reached (${MAX_PAUSE_TURN_CONTINUATIONS}), stopping`);
+        break;
+      }
+      log.info(`Claim ${index + 1}: pause_turn (${pauseTurnCount}/${MAX_PAUSE_TURN_CONTINUATIONS}) -- continuing`);
       messages.push({ role: "assistant", content: response.content });
       messages.push({ role: "user", content: "Continue." });
       continue;
@@ -224,6 +301,7 @@ const parseSingleClaimResponse = (
       speaker: parsed.speaker || originalClaim.speaker,
       status: validStatuses.includes(parsed.status) ? parsed.status : "unverifiable",
       evidence: parsed.evidence || "No evidence provided.",
+      sources: Array.isArray(parsed.sources) ? parsed.sources : [],
     };
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);

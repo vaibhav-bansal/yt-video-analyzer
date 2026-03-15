@@ -9,6 +9,7 @@ export interface VideoMetadata {
   description: string;
   channelName: string;
   duration: string;
+  publishedAt: string;
   url: string;
 }
 
@@ -22,6 +23,7 @@ export interface TranscriptResult {
   metadata: VideoMetadata;
   segments: TranscriptSegment[];
   formattedTranscript: string;
+  transcriptLanguage: "en" | "hi";
 }
 
 export type ClaimType =
@@ -60,11 +62,18 @@ export type VerificationStatus =
   | "contradicted"
   | "partially_true"
   | "unverifiable"
-  | "not_checked";
+  | "not_checked"
+  | "timeout";
+
+export interface ClaimSource {
+  url: string;
+  title: string;
+}
 
 export interface VerifiedClaim extends ExtractedClaim {
   status: VerificationStatus;
   evidence: string;
+  sources?: ClaimSource[];
 }
 
 export interface CredibilityReport {

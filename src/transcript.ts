@@ -41,26 +41,63 @@ export const fetchVideoMetadata = async (
     description: video.snippet?.description || "",
     channelName: video.snippet?.channelTitle || "Unknown Channel",
     duration: formatDuration(video.contentDetails?.duration || ""),
+    publishedAt: video.snippet?.publishedAt || "",
     url: `https://www.youtube.com/watch?v=${videoId}`,
   };
 };
 
+interface TranscriptFetchResult {
+  segments: TranscriptSegment[];
+  language: "en" | "hi";
+}
+
+const tryFetchTranscript = async (
+  videoId: string,
+  lang: string
+): Promise<Array<{ offset: number; duration: number; text: string }> | null> => {
+  try {
+    const raw = await YoutubeTranscript.fetchTranscript(videoId, { lang });
+    return raw && raw.length > 0 ? raw : null;
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    if (message.includes("No transcripts are available in")) {
+      return null;
+    }
+    throw err;
+  }
+};
+
 export const fetchVideoTranscript = async (
   videoId: string
-): Promise<TranscriptSegment[]> => {
-  const raw = await YoutubeTranscript.fetchTranscript(videoId, { lang: "en" });
-
-  if (!raw || raw.length === 0) {
-    throw new Error(
-      "No transcript/captions available for this video. The video may not have captions enabled."
-    );
+): Promise<TranscriptFetchResult> => {
+  // Try English first, then Hindi
+  const englishRaw = await tryFetchTranscript(videoId, "en");
+  if (englishRaw) {
+    return {
+      segments: englishRaw.map((entry) => ({
+        start: entry.offset / 1000,
+        duration: entry.duration / 1000,
+        text: entry.text.trim(),
+      })),
+      language: "en",
+    };
   }
 
-  return raw.map((entry: { offset: number; duration: number; text: string }) => ({
-    start: entry.offset / 1000,
-    duration: entry.duration / 1000,
-    text: entry.text.trim(),
-  }));
+  const hindiRaw = await tryFetchTranscript(videoId, "hi");
+  if (hindiRaw) {
+    return {
+      segments: hindiRaw.map((entry) => ({
+        start: entry.offset / 1000,
+        duration: entry.duration / 1000,
+        text: entry.text.trim(),
+      })),
+      language: "hi",
+    };
+  }
+
+  throw new Error(
+    "Neither English nor Hindi transcripts are available for this video."
+  );
 };
 
 export const formatTranscriptForLLM = (segments: TranscriptSegment[]): string => {
@@ -103,14 +140,14 @@ export const getTranscript = async (
   videoId: string,
   apiKey: string
 ): Promise<TranscriptResult> => {
-  const [metadata, segments] = await Promise.all([
+  const [metadata, { segments, language }] = await Promise.all([
     fetchVideoMetadata(videoId, apiKey),
     fetchVideoTranscript(videoId),
   ]);
 
   const formattedTranscript = formatTranscriptForLLM(segments);
 
-  return { metadata, segments, formattedTranscript };
+  return { metadata, segments, formattedTranscript, transcriptLanguage: language };
 };
 
 const formatSeconds = (totalSeconds: number): string => {

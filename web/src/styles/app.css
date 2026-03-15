@@ -1,0 +1,480 @@
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+:root {
+  --bg: #0f1117;
+  --surface: #1a1d27;
+  --surface-hover: #22263a;
+  --border: #2a2e3f;
+  --text: #e4e6ed;
+  --text-muted: #8b8fa3;
+  --accent: #6366f1;
+  --accent-hover: #818cf8;
+  --green: #22c55e;
+  --red: #ef4444;
+  --yellow: #eab308;
+  --orange: #f97316;
+  --blue: #3b82f6;
+  --radius: 8px;
+}
+
+body {
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  background: var(--bg);
+  color: var(--text);
+  line-height: 1.6;
+  min-height: 100vh;
+}
+
+.app {
+  max-width: 1200px;
+  margin: 0 auto;
+  padding: 2rem 1.5rem;
+}
+
+/* Header */
+.header {
+  text-align: center;
+  margin-bottom: 2rem;
+}
+
+.header h1 {
+  font-size: 1.75rem;
+  font-weight: 600;
+  margin-bottom: 0.25rem;
+}
+
+.subtitle {
+  color: var(--text-muted);
+  font-size: 0.9rem;
+}
+
+/* URL Input */
+.url-input {
+  display: flex;
+  gap: 0.5rem;
+  max-width: 640px;
+  margin: 0 auto 1.5rem;
+}
+
+.url-input input {
+  flex: 1;
+  padding: 0.75rem 1rem;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  color: var(--text);
+  font-size: 0.95rem;
+  outline: none;
+  transition: border-color 0.2s;
+}
+
+.url-input input:focus {
+  border-color: var(--accent);
+}
+
+.url-input input::placeholder {
+  color: var(--text-muted);
+}
+
+.url-input button {
+  padding: 0.75rem 1.5rem;
+  background: var(--accent);
+  color: white;
+  border: none;
+  border-radius: var(--radius);
+  font-size: 0.95rem;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background 0.2s;
+  white-space: nowrap;
+}
+
+.url-input button:hover:not(:disabled) {
+  background: var(--accent-hover);
+}
+
+.url-input button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* Loading */
+.loading-stage {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.75rem;
+  padding: 1rem;
+  color: var(--text-muted);
+  font-size: 0.9rem;
+}
+
+.spinner {
+  width: 18px;
+  height: 18px;
+  border: 2px solid var(--border);
+  border-top-color: var(--accent);
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+/* Error */
+.error-banner {
+  background: rgba(239, 68, 68, 0.1);
+  border: 1px solid rgba(239, 68, 68, 0.3);
+  border-radius: var(--radius);
+  padding: 1rem 1.25rem;
+  margin-bottom: 1.5rem;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+.error-banner p {
+  color: var(--red);
+  font-size: 0.9rem;
+}
+
+.error-banner button {
+  padding: 0.4rem 1rem;
+  background: transparent;
+  border: 1px solid var(--red);
+  color: var(--red);
+  border-radius: var(--radius);
+  cursor: pointer;
+  font-size: 0.85rem;
+  white-space: nowrap;
+}
+
+/* Video Meta */
+.video-meta {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 1.25rem 1.5rem;
+  margin-bottom: 1.5rem;
+}
+
+.video-meta h2 {
+  font-size: 1.2rem;
+  font-weight: 600;
+  margin-bottom: 0.5rem;
+}
+
+.meta-details {
+  color: var(--text-muted);
+  font-size: 0.85rem;
+  margin-bottom: 0.5rem;
+}
+
+.separator {
+  margin: 0 0.5rem;
+  opacity: 0.4;
+}
+
+.video-link {
+  color: var(--accent);
+  text-decoration: none;
+  font-size: 0.85rem;
+}
+
+.video-link:hover {
+  color: var(--accent-hover);
+  text-decoration: underline;
+}
+
+/* Content Grid */
+.content-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 1.5rem;
+  align-items: start;
+}
+
+@media (max-width: 768px) {
+  .content-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* Sections */
+.section {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 1.25rem 1.5rem;
+  margin-bottom: 1.5rem;
+}
+
+.section h3 {
+  font-size: 1rem;
+  font-weight: 600;
+  margin-bottom: 0.75rem;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+/* Synopsis */
+.synopsis-text {
+  color: var(--text-muted);
+  font-size: 0.95rem;
+  line-height: 1.7;
+}
+
+/* Key Takeaways */
+.takeaways-list {
+  padding-left: 1.25rem;
+}
+
+.takeaways-list li {
+  color: var(--text);
+  font-size: 0.9rem;
+  margin-bottom: 0.5rem;
+  line-height: 1.5;
+}
+
+/* Segments */
+.segment {
+  padding: 0.75rem 0;
+  border-bottom: 1px solid var(--border);
+}
+
+.segment:last-child {
+  border-bottom: none;
+  padding-bottom: 0;
+}
+
+.segment-header {
+  display: flex;
+  align-items: baseline;
+  gap: 0.75rem;
+  margin-bottom: 0.35rem;
+}
+
+.segment-time {
+  font-size: 0.8rem;
+  color: var(--accent);
+  white-space: nowrap;
+}
+
+.segment-time a {
+  color: var(--accent);
+  text-decoration: none;
+}
+
+.segment-time a:hover {
+  text-decoration: underline;
+}
+
+.segment-title {
+  font-weight: 500;
+  font-size: 0.9rem;
+}
+
+.segment-summary {
+  color: var(--text-muted);
+  font-size: 0.85rem;
+  line-height: 1.5;
+}
+
+/* Claims */
+.claims-counter {
+  font-size: 0.8rem;
+  font-weight: 400;
+  color: var(--text-muted);
+}
+
+.claims-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.claim-card {
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 0.75rem 1rem;
+  transition: border-color 0.3s ease;
+}
+
+.claim-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 0.4rem;
+}
+
+.claim-timestamp {
+  font-size: 0.8rem;
+  color: var(--text-muted);
+}
+
+.claim-badge {
+  font-size: 0.7rem;
+  font-weight: 600;
+  padding: 0.15rem 0.5rem;
+  border-radius: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+
+.badge-pending {
+  background: rgba(99, 102, 241, 0.15);
+  color: var(--accent);
+}
+
+.badge-confirmed {
+  background: rgba(34, 197, 94, 0.15);
+  color: var(--green);
+}
+
+.badge-contradicted {
+  background: rgba(239, 68, 68, 0.15);
+  color: var(--red);
+}
+
+.badge-partially_true {
+  background: rgba(234, 179, 8, 0.15);
+  color: var(--yellow);
+}
+
+.badge-unverifiable {
+  background: rgba(249, 115, 22, 0.15);
+  color: var(--orange);
+}
+
+.badge-not_checked {
+  background: rgba(139, 143, 163, 0.15);
+  color: var(--text-muted);
+}
+
+.badge-timeout {
+  background: rgba(239, 68, 68, 0.15);
+  color: var(--red);
+}
+
+.claim-timeout {
+  border-color: rgba(239, 68, 68, 0.25);
+}
+
+.claim-retry-btn {
+  font-size: 0.72rem;
+  font-weight: 600;
+  padding: 0.2rem 0.7rem;
+  border-radius: 12px;
+  border: 1px solid var(--red);
+  background: rgba(239, 68, 68, 0.12);
+  color: var(--red);
+  cursor: pointer;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  transition: background 0.15s;
+}
+
+.claim-retry-btn:hover:not(:disabled) {
+  background: rgba(239, 68, 68, 0.25);
+}
+
+.claim-retry-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.claim-confirmed {
+  border-color: rgba(34, 197, 94, 0.3);
+}
+
+.claim-contradicted {
+  border-color: rgba(239, 68, 68, 0.3);
+}
+
+.claim-partially_true {
+  border-color: rgba(234, 179, 8, 0.3);
+}
+
+.claim-text {
+  font-size: 0.88rem;
+  line-height: 1.5;
+  margin-bottom: 0.35rem;
+  font-style: italic;
+}
+
+.claim-meta {
+  font-size: 0.78rem;
+  color: var(--text-muted);
+  margin-bottom: 0.35rem;
+}
+
+.claim-speaker {
+  margin-left: 0.25rem;
+}
+
+.claim-evidence {
+  font-size: 0.82rem;
+  color: var(--text-muted);
+  line-height: 1.5;
+  padding-top: 0.5rem;
+  border-top: 1px solid var(--border);
+  margin-top: 0.5rem;
+}
+
+.claim-sources {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+  margin-top: 0.35rem;
+}
+
+.claim-sources a {
+  font-size: 0.75rem;
+  color: var(--accent);
+  text-decoration: none;
+  background: rgba(99, 102, 241, 0.1);
+  padding: 0.1rem 0.4rem;
+  border-radius: 4px;
+}
+
+.claim-sources a:hover {
+  text-decoration: underline;
+}
+
+/* Credibility Summary */
+.credibility-summary {
+  border-color: var(--accent);
+}
+
+.credibility-summary p {
+  color: var(--text-muted);
+  font-size: 0.95rem;
+}
+
+/* Animation */
+.fade-in {
+  animation: fadeIn 0.4s ease-out;
+}
+
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
