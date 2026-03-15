@@ -2,6 +2,12 @@ import { useReducer, useCallback, useRef, useState } from "react";
 import type {
   MetadataEvent,
   ContentEvent,
+  SynopsisDeltaEvent,
+  TakeawayDeltaEvent,
+  TakeawayCompleteEvent,
+  SegmentHeaderEvent,
+  SegmentDeltaEvent,
+  SegmentCompleteEvent,
   ClaimsEvent,
   ClaimVerifiedEvent,
   CompleteEvent,
@@ -17,6 +23,7 @@ export interface AnalysisState {
   synopsis: string | null;
   segments: SegmentSummary[] | null;
   keyTakeaways: string[] | null;
+  contentComplete: boolean;
   claims: ExtractedClaim[] | null;
   verifiedClaims: Record<number, VerifiedClaim>;
   summary: string | null;
@@ -26,6 +33,12 @@ export interface AnalysisState {
 type Action =
   | { type: "START" }
   | { type: "METADATA"; payload: MetadataEvent }
+  | { type: "SYNOPSIS_DELTA"; payload: SynopsisDeltaEvent }
+  | { type: "TAKEAWAY_DELTA"; payload: TakeawayDeltaEvent }
+  | { type: "TAKEAWAY_COMPLETE"; payload: TakeawayCompleteEvent }
+  | { type: "SEGMENT_HEADER"; payload: SegmentHeaderEvent }
+  | { type: "SEGMENT_DELTA"; payload: SegmentDeltaEvent }
+  | { type: "SEGMENT_COMPLETE"; payload: SegmentCompleteEvent }
   | { type: "CONTENT"; payload: ContentEvent }
   | { type: "CLAIMS"; payload: ClaimsEvent }
   | { type: "CLAIM_VERIFIED"; payload: ClaimVerifiedEvent }
@@ -39,6 +52,7 @@ const initialState: AnalysisState = {
   synopsis: null,
   segments: null,
   keyTakeaways: null,
+  contentComplete: false,
   claims: null,
   verifiedClaims: {},
   summary: null,
@@ -51,9 +65,46 @@ const reducer = (state: AnalysisState, action: Action): AnalysisState => {
       return { ...initialState, status: "loading" };
     case "METADATA":
       return { ...state, status: "streaming", metadata: action.payload };
+    case "SYNOPSIS_DELTA":
+      return {
+        ...state,
+        synopsis: (state.synopsis || "") + action.payload.delta,
+      };
+    case "TAKEAWAY_DELTA": {
+      const takeaways = [...(state.keyTakeaways || [])];
+      const idx = action.payload.index;
+      if (idx >= takeaways.length) {
+        takeaways.push(action.payload.delta);
+      } else {
+        takeaways[idx] = (takeaways[idx] || "") + action.payload.delta;
+      }
+      return { ...state, keyTakeaways: takeaways };
+    }
+    case "TAKEAWAY_COMPLETE":
+      return state;
+    case "SEGMENT_HEADER": {
+      const segments = [...(state.segments || [])];
+      const { index, ...header } = action.payload;
+      segments[index] = { ...header, summary: "" };
+      return { ...state, segments };
+    }
+    case "SEGMENT_DELTA": {
+      const segments = [...(state.segments || [])];
+      const seg = segments[action.payload.index];
+      if (seg) {
+        segments[action.payload.index] = {
+          ...seg,
+          summary: seg.summary + action.payload.delta,
+        };
+      }
+      return { ...state, segments };
+    }
+    case "SEGMENT_COMPLETE":
+      return state;
     case "CONTENT":
       return {
         ...state,
+        contentComplete: true,
         synopsis: action.payload.synopsis,
         segments: action.payload.segments,
         keyTakeaways: action.payload.keyTakeaways,
@@ -101,6 +152,30 @@ export const useAnalysis = () => {
 
       es.addEventListener("metadata", (e) => {
         dispatch({ type: "METADATA", payload: JSON.parse(e.data) });
+      });
+
+      es.addEventListener("synopsis_delta", (e) => {
+        dispatch({ type: "SYNOPSIS_DELTA", payload: JSON.parse(e.data) });
+      });
+
+      es.addEventListener("takeaway_delta", (e) => {
+        dispatch({ type: "TAKEAWAY_DELTA", payload: JSON.parse(e.data) });
+      });
+
+      es.addEventListener("takeaway_complete", (e) => {
+        dispatch({ type: "TAKEAWAY_COMPLETE", payload: JSON.parse(e.data) });
+      });
+
+      es.addEventListener("segment_header", (e) => {
+        dispatch({ type: "SEGMENT_HEADER", payload: JSON.parse(e.data) });
+      });
+
+      es.addEventListener("segment_delta", (e) => {
+        dispatch({ type: "SEGMENT_DELTA", payload: JSON.parse(e.data) });
+      });
+
+      es.addEventListener("segment_complete", (e) => {
+        dispatch({ type: "SEGMENT_COMPLETE", payload: JSON.parse(e.data) });
       });
 
       es.addEventListener("content", (e) => {

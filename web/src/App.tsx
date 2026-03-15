@@ -10,6 +10,7 @@ import { LoadingStage } from "./components/LoadingStage";
 export const App = () => {
   const { state, startAnalysis, reset, retryClaim, retryingClaims } = useAnalysis();
   const isActive = state.status === "loading" || state.status === "streaming";
+  const contentStreaming = !!state.synopsis && !state.contentComplete;
 
   return (
     <div className="app">
@@ -27,7 +28,8 @@ export const App = () => {
           status={state.status}
           hasMetadata={!!state.metadata}
           hasClaims={!!state.claims}
-          hasContent={!!state.synopsis}
+          hasContent={state.contentComplete}
+          contentStreaming={contentStreaming}
         />
 
         {state.error && (
@@ -37,18 +39,35 @@ export const App = () => {
           </div>
         )}
 
-        {state.metadata && <VideoMeta metadata={state.metadata} />}
+        {state.metadata && (
+          <VideoMeta
+            metadata={state.metadata}
+            synopsis={state.synopsis}
+            segments={state.segments}
+            keyTakeaways={state.keyTakeaways}
+            claims={state.claims}
+            verifiedClaims={state.verifiedClaims}
+            summary={state.summary}
+            analysisComplete={state.status === "complete"}
+          />
+        )}
 
         <div className="content-grid">
           <div className="content-left">
-            {state.synopsis && <Synopsis text={state.synopsis} />}
+            {state.synopsis && (
+              <Synopsis text={state.synopsis} streaming={contentStreaming} />
+            )}
             {state.keyTakeaways && (
-              <KeyTakeaways takeaways={state.keyTakeaways} />
+              <KeyTakeaways
+                takeaways={state.keyTakeaways}
+                streaming={contentStreaming}
+              />
             )}
             {state.segments && (
               <Segments
                 segments={state.segments}
                 videoUrl={state.metadata?.url}
+                streaming={contentStreaming}
               />
             )}
           </div>
@@ -56,7 +75,13 @@ export const App = () => {
           <div className="content-right">
             {state.summary && state.status === "complete" && (
               <section className="section credibility-summary fade-in">
-                <h3>Credibility Summary</h3>
+                <h3>
+                  Credibility Summary
+                  <span className="credibility-tooltip-wrapper">
+                    <span className="credibility-tooltip-icon">&#9432;</span>
+                    <span className="credibility-tooltip-text">AI-searched against web sources. Not a substitute for independent verification.</span>
+                  </span>
+                </h3>
                 <p>{state.summary}</p>
               </section>
             )}

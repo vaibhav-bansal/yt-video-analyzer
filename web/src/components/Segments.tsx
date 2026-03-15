@@ -3,9 +3,10 @@ import type { SegmentSummary } from "@shared/types";
 interface SegmentsProps {
   segments: SegmentSummary[];
   videoUrl?: string;
+  streaming?: boolean;
 }
 
-export const Segments = ({ segments, videoUrl }: SegmentsProps) => {
+export const Segments = ({ segments, videoUrl, streaming }: SegmentsProps) => {
   const makeTimestampLink = (segment: SegmentSummary) => {
     if (!videoUrl) return null;
     return `${videoUrl}&t=${segment.startSeconds}`;
@@ -31,7 +32,12 @@ export const Segments = ({ segments, videoUrl }: SegmentsProps) => {
                 </span>
                 <span className="segment-title">{seg.title}</span>
               </div>
-              <p className="segment-summary">{seg.summary}</p>
+              <p className="segment-summary">
+                {seg.summary}
+                {streaming && i === segments.length - 1 && (
+                  <span className="streaming-cursor" />
+                )}
+              </p>
             </div>
           );
         })}

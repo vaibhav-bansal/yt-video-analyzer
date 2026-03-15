@@ -166,12 +166,39 @@ body {
   border-radius: var(--radius);
   padding: 1.25rem 1.5rem;
   margin-bottom: 1.5rem;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 1.5rem;
 }
 
 .video-meta h2 {
   font-size: 1.2rem;
   font-weight: 600;
   margin-bottom: 0.5rem;
+}
+
+.download-btn {
+  padding: 0.75rem 1.5rem;
+  background: var(--accent);
+  color: white;
+  border: none;
+  border-radius: var(--radius);
+  font-size: 0.95rem;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background 0.2s;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+.download-btn:hover:not(:disabled) {
+  background: var(--accent-hover);
+}
+
+.download-btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
 }
 
 .meta-details {
@@ -458,6 +485,51 @@ body {
   border-color: var(--accent);
 }
 
+.credibility-summary h3 {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+}
+
+.credibility-tooltip-wrapper {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+}
+
+.credibility-tooltip-icon {
+  font-size: 0.85rem;
+  color: var(--text-muted);
+  cursor: help;
+  font-weight: normal;
+}
+
+.credibility-tooltip-text {
+  visibility: hidden;
+  opacity: 0;
+  position: absolute;
+  left: 50%;
+  top: calc(100% + 8px);
+  transform: translateX(-50%);
+  background: #2a2a3d;
+  color: #e0e0e0;
+  font-size: 0.78rem;
+  font-weight: normal;
+  line-height: 1.4;
+  padding: 0.5rem 0.75rem;
+  border-radius: 6px;
+  border: 1px solid #555;
+  white-space: nowrap;
+  z-index: 10;
+  pointer-events: none;
+  transition: opacity 0.15s ease, visibility 0.15s ease;
+}
+
+.credibility-tooltip-wrapper:hover .credibility-tooltip-text {
+  visibility: visible;
+  opacity: 1;
+}
+
 .credibility-summary p {
   color: var(--text-muted);
   font-size: 0.95rem;
@@ -477,4 +549,18 @@ body {
     opacity: 1;
     transform: translateY(0);
   }
+}
+
+.streaming-cursor {
+  display: inline-block;
+  width: 2px;
+  height: 1em;
+  background: var(--accent);
+  margin-left: 2px;
+  vertical-align: text-bottom;
+  animation: blink 0.8s step-end infinite;
+}
+
+@keyframes blink {
+  50% { opacity: 0; }
 }

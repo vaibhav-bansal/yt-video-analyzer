@@ -21,7 +21,7 @@ app.get("/api/analyze", handleAnalyze(config));
 app.post("/api/retry-claim", handleRetryClaim(config));
 
 // Serve static frontend in production
-const webDistPath = path.resolve(__dirname, "../web/dist");
+const webDistPath = path.resolve(process.cwd(), "web/dist");
 app.use(express.static(webDistPath));
 app.get("/{*splat}", (_req, res) => {
   res.sendFile(path.join(webDistPath, "index.html"));

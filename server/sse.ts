@@ -67,7 +67,27 @@ export const handleAnalyze = (config: Config) => {
         transcript.formattedTranscript,
         transcript.metadata,
         config.anthropicApiKey,
-        transcript.transcriptLanguage
+        transcript.transcriptLanguage,
+        {
+          onSynopsisDelta: (delta) => {
+            if (!clientDisconnected) sendSSE(res, "synopsis_delta", { delta });
+          },
+          onTakeawayDelta: (index, delta) => {
+            if (!clientDisconnected) sendSSE(res, "takeaway_delta", { index, delta });
+          },
+          onTakeawayComplete: (index) => {
+            if (!clientDisconnected) sendSSE(res, "takeaway_complete", { index });
+          },
+          onSegmentHeader: (index, header) => {
+            if (!clientDisconnected) sendSSE(res, "segment_header", { index, ...header });
+          },
+          onSegmentDelta: (index, delta) => {
+            if (!clientDisconnected) sendSSE(res, "segment_delta", { index, delta });
+          },
+          onSegmentComplete: (index) => {
+            if (!clientDisconnected) sendSSE(res, "segment_complete", { index });
+          },
+        }
       );
 
       const claimsPromise = extractClaims(
@@ -147,19 +167,20 @@ export const handleAnalyze = (config: Config) => {
             summary: "No factual claims required verification.",
           });
 
-      // Wait for both content analysis and credibility
-      const [contentResult, credibilityResult] = await Promise.all([
-        contentPromise,
-        credibilityPromise,
-      ]);
+      // Send content seal as soon as content analysis finishes (don't wait for credibility)
+      const contentResult = await contentPromise;
+      if (!clientDisconnected) {
+        sendSSE(res, "content", {
+          synopsis: contentResult.synopsis,
+          segments: contentResult.segments,
+          keyTakeaways: contentResult.keyTakeaways,
+        });
+      }
+
+      // Wait for credibility to finish
+      const credibilityResult = await credibilityPromise;
 
       if (clientDisconnected) return;
-
-      sendSSE(res, "content", {
-        synopsis: contentResult.synopsis,
-        segments: contentResult.segments,
-        keyTakeaways: contentResult.keyTakeaways,
-      });
 
       // Save analysis markdown file (same as CLI)
       const nonFactualVerified: VerifiedClaim[] = nonFactualClaims.map((c) => ({

@@ -3,6 +3,7 @@ interface LoadingStageProps {
   hasMetadata: boolean;
   hasClaims: boolean;
   hasContent: boolean;
+  contentStreaming?: boolean;
 }
 
 export const LoadingStage = ({
@@ -10,19 +11,24 @@ export const LoadingStage = ({
   hasMetadata,
   hasClaims,
   hasContent,
+  contentStreaming,
 }: LoadingStageProps) => {
   if (status === "idle" || status === "complete") return null;
-
-  let message = "Fetching video transcript...";
 
   if (status === "error") {
     return null;
   }
 
-  if (hasMetadata && !hasClaims && !hasContent) {
+  let message = "Fetching video transcript...";
+
+  if (hasMetadata && !hasClaims && !hasContent && !contentStreaming) {
     message = "Analyzing content and extracting claims...";
+  } else if (hasMetadata && contentStreaming && !hasClaims) {
+    message = "Streaming content analysis, extracting claims...";
+  } else if (hasMetadata && contentStreaming && hasClaims) {
+    message = "Streaming content analysis, verifying claims...";
   } else if (hasClaims && !hasContent) {
-    message = "Verifying claims and analyzing content...";
+    message = "Verifying claims...";
   } else if (hasContent && !hasClaims) {
     message = "Extracting and verifying claims...";
   } else if (hasClaims && hasContent) {

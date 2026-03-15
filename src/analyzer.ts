@@ -1,42 +1,52 @@
 import Anthropic from "@anthropic-ai/sdk";
+import { parse as parsePartial, STR, ARR, OBJ, NUM } from "partial-json";
 import { CLAUDE_MODEL, MAX_CONTENT_TOKENS, MAX_CLAIMS_TOKENS } from "./config.js";
 import { withRetry } from "./retry.js";
 import type { ExtractedClaim, SegmentSummary, VideoMetadata } from "./types.js";
 
 export interface ContentAnalysis {
   synopsis: string;
-  segments: SegmentSummary[];
   keyTakeaways: string[];
+  segments: SegmentSummary[];
 }
 
 export interface ClaimExtractionResult {
   claims: ExtractedClaim[];
 }
 
+export interface ContentStreamCallbacks {
+  onSynopsisDelta?: (delta: string) => void;
+  onTakeawayDelta?: (index: number, delta: string) => void;
+  onTakeawayComplete?: (index: number) => void;
+  onSegmentHeader?: (index: number, header: { timestamp: string; endTimestamp: string; title: string; startSeconds: number }) => void;
+  onSegmentDelta?: (index: number, delta: string) => void;
+  onSegmentComplete?: (index: number) => void;
+}
+
 const CONTENT_SYSTEM_PROMPT = `You are a video content analyst. Analyze the transcript and return a JSON object:
 
 {
   "synopsis": "2-3 sentence overview of what the video covers and what the viewer will learn.",
+  "keyTakeaways": ["Key point 1", "Key point 2"],
   "segments": [
     {
       "timestamp": "M:SS",
       "endTimestamp": "M:SS",
       "title": "Short title",
-      "summary": "2-3 sentence summary",
-      "startSeconds": 0
+      "startSeconds": 0,
+      "summary": "2-3 sentence summary"
     }
-  ],
-  "keyTakeaways": ["Key point 1", "Key point 2"]
+  ]
 }
 
 Guidelines:
 - SYNOPSIS: 2-3 sentences to help someone decide whether to watch
-- SEGMENTS: Logical topic boundaries, not fixed intervals. Include start/end timestamps, title, summary. startSeconds = numeric seconds.
+- KEY TAKEAWAYS: Short videos (< 15 min): 5-7. Medium (15-45 min): 7-10. Long (> 45 min): 10-15. Each should be a standalone insight.
+- SEGMENTS: Logical topic boundaries, not fixed intervals. Include start/end timestamps, title, startSeconds (numeric seconds), and summary.
   - SEGMENT SUMMARIES: Write each summary as a direct explanation of the topic, NOT a description of what the video covers. Teach the reader the concept, fact, or story — as if they are reading a mini-explanation. Use simple analogies from the video when they help. Mix third-person and second-person naturally for clarity.
     BAD: "Explains derivatives as financial instruments that derive their value from an underlying asset."
     GOOD: "Derivatives are financial instruments that derive their value from an underlying asset, such as stocks. Think of it like dairy products — their value comes from milk prices."
 - SPEAKERS: When multiple speakers are detectable, attribute statements using names if introduced (e.g., "According to Dr. Ramanujan, ...") or roles ("the host", "the guest"). Single-speaker videos need no attribution.
-- KEY TAKEAWAYS: Short videos (< 15 min): 5-7. Medium (15-45 min): 7-10. Long (> 45 min): 10-15. Each should be a standalone insight.
 - IGNORE sponsored segments, ad reads, and product promotions entirely. Do not summarize them or include them as segments.
 
 Return ONLY valid JSON.`;
@@ -90,7 +100,8 @@ export const analyzeContent = async (
   transcript: string,
   metadata: VideoMetadata,
   apiKey: string,
-  transcriptLanguage?: "en" | "hi"
+  transcriptLanguage?: "en" | "hi",
+  callbacks?: ContentStreamCallbacks
 ): Promise<ContentAnalysis> => {
   return withRetry(async () => {
     const client = new Anthropic({ apiKey });
@@ -105,9 +116,191 @@ export const analyzeContent = async (
       messages: [{ role: "user", content: userPrompt }],
     } as unknown as Anthropic.MessageCreateParamsStreaming);
 
+    if (callbacks) {
+      let accumulatedJson = "";
+      let lastSynopsisLen = 0;
+      let lastTakeawayIdx = -1;
+      let lastTakeawayLen = 0;
+      let lastSegmentIdx = -1;
+      let lastSegmentSummaryLen = 0;
+      const segmentHeadersSent = new Set<number>();
+
+      stream.on("text", () => {
+        // Rebuild accumulated JSON from all text blocks so far
+        const snapshot = stream.currentMessage;
+        if (!snapshot) return;
+        accumulatedJson = "";
+        for (const block of snapshot.content) {
+          if (block.type === "text") {
+            accumulatedJson += block.text;
+          }
+        }
+
+        // Strip markdown fences if present
+        let jsonStr = accumulatedJson;
+        const fenceStart = jsonStr.indexOf("```");
+        if (fenceStart !== -1) {
+          const afterFence = jsonStr.indexOf("\n", fenceStart);
+          if (afterFence !== -1) {
+            jsonStr = jsonStr.slice(afterFence + 1);
+            const fenceEnd = jsonStr.lastIndexOf("```");
+            if (fenceEnd !== -1) {
+              jsonStr = jsonStr.slice(0, fenceEnd);
+            }
+          }
+        }
+
+        try {
+          const parsed = parsePartial(jsonStr, STR | ARR | OBJ | NUM);
+
+          // Synopsis delta
+          if (parsed.synopsis && typeof parsed.synopsis === "string") {
+            if (parsed.synopsis.length > lastSynopsisLen) {
+              callbacks.onSynopsisDelta?.(parsed.synopsis.slice(lastSynopsisLen));
+              lastSynopsisLen = parsed.synopsis.length;
+            }
+          }
+
+          // Takeaway streaming
+          if (Array.isArray(parsed.keyTakeaways)) {
+            const takeaways: string[] = parsed.keyTakeaways;
+            // All takeaways are complete once segments key appears
+            const allComplete = parsed.segments !== undefined;
+            const safeCount = allComplete ? takeaways.length : Math.max(0, takeaways.length - 1);
+
+            // Flush completed takeaways we haven't finished emitting
+            for (let i = 0; i <= Math.min(safeCount - 1, takeaways.length - 1); i++) {
+              if (i > lastTakeawayIdx) {
+                // New completed takeaway — emit full text as delta + complete
+                callbacks.onTakeawayDelta?.(i, takeaways[i]);
+                callbacks.onTakeawayComplete?.(i);
+                lastTakeawayIdx = i;
+                lastTakeawayLen = 0;
+              } else if (i === lastTakeawayIdx && i < safeCount) {
+                // Already emitting this one — nothing to do, it's complete
+              }
+            }
+
+            // Stream the current (potentially partial) takeaway
+            const currentIdx = allComplete ? -1 : takeaways.length - 1;
+            if (currentIdx > lastTakeawayIdx) {
+              // Brand new partial takeaway
+              const text = takeaways[currentIdx];
+              if (text.length > 0) {
+                callbacks.onTakeawayDelta?.(currentIdx, text);
+                lastTakeawayIdx = currentIdx;
+                lastTakeawayLen = text.length;
+              }
+            } else if (currentIdx >= 0 && currentIdx === lastTakeawayIdx) {
+              // Continuing partial takeaway
+              const text = takeaways[currentIdx];
+              if (text.length > lastTakeawayLen) {
+                callbacks.onTakeawayDelta?.(currentIdx, text.slice(lastTakeawayLen));
+                lastTakeawayLen = text.length;
+              }
+            }
+          }
+
+          // Segment streaming
+          if (Array.isArray(parsed.segments)) {
+            const segments: Record<string, unknown>[] = parsed.segments;
+
+            for (let i = 0; i < segments.length; i++) {
+              const seg = segments[i];
+
+              // Emit header once we have all header fields
+              if (
+                !segmentHeadersSent.has(i) &&
+                seg.timestamp && seg.endTimestamp && seg.title &&
+                seg.startSeconds !== undefined
+              ) {
+                callbacks.onSegmentHeader?.(i, {
+                  timestamp: seg.timestamp as string,
+                  endTimestamp: seg.endTimestamp as string,
+                  title: seg.title as string,
+                  startSeconds: seg.startSeconds as number,
+                });
+                segmentHeadersSent.has(i) || segmentHeadersSent.add(i);
+              }
+
+              // Complete previous segment when a new one starts
+              if (i > lastSegmentIdx + 1) {
+                // We skipped segments — flush them
+                for (let j = lastSegmentIdx + 1; j < i; j++) {
+                  callbacks.onSegmentComplete?.(j);
+                }
+                lastSegmentIdx = i - 1;
+                lastSegmentSummaryLen = 0;
+              }
+
+              // Stream summary delta for the current segment
+              if (i >= segments.length - 1 || i > lastSegmentIdx) {
+                const summary = (seg.summary as string) || "";
+                if (i > lastSegmentIdx) {
+                  // New segment — complete the previous one if any
+                  if (lastSegmentIdx >= 0) {
+                    callbacks.onSegmentComplete?.(lastSegmentIdx);
+                  }
+                  lastSegmentIdx = i;
+                  lastSegmentSummaryLen = 0;
+                }
+                if (summary.length > lastSegmentSummaryLen) {
+                  callbacks.onSegmentDelta?.(i, summary.slice(lastSegmentSummaryLen));
+                  lastSegmentSummaryLen = summary.length;
+                }
+              }
+            }
+          }
+        } catch {
+          // partial-json parse failed — skip this token, try again on the next one
+        }
+      });
+
+      const response = await stream.finalMessage();
+      const text = extractText(response);
+      const result = parseResponse<ContentAnalysis>(text, ["synopsis", "keyTakeaways", "segments"]);
+
+      // Flush any remaining content not yet emitted
+      if (result.synopsis.length > lastSynopsisLen) {
+        callbacks.onSynopsisDelta?.(result.synopsis.slice(lastSynopsisLen));
+      }
+      for (let i = lastTakeawayIdx + 1; i < result.keyTakeaways.length; i++) {
+        callbacks.onTakeawayDelta?.(i, result.keyTakeaways[i]);
+        callbacks.onTakeawayComplete?.(i);
+      }
+      // Complete the last partial takeaway if it wasn't completed
+      if (lastTakeawayIdx >= 0 && lastTakeawayIdx < result.keyTakeaways.length) {
+        const remaining = result.keyTakeaways[lastTakeawayIdx].slice(lastTakeawayLen);
+        if (remaining.length > 0) {
+          callbacks.onTakeawayDelta?.(lastTakeawayIdx, remaining);
+        }
+        callbacks.onTakeawayComplete?.(lastTakeawayIdx);
+      }
+      for (let i = Math.max(0, lastSegmentIdx); i < result.segments.length; i++) {
+        if (!segmentHeadersSent.has(i)) {
+          callbacks.onSegmentHeader?.(i, {
+            timestamp: result.segments[i].timestamp,
+            endTimestamp: result.segments[i].endTimestamp,
+            title: result.segments[i].title,
+            startSeconds: result.segments[i].startSeconds,
+          });
+        }
+        const remaining = result.segments[i].summary.slice(
+          i === lastSegmentIdx ? lastSegmentSummaryLen : 0
+        );
+        if (remaining.length > 0) {
+          callbacks.onSegmentDelta?.(i, remaining);
+        }
+        callbacks.onSegmentComplete?.(i);
+      }
+
+      return result;
+    }
+
+    // Non-streaming path (CLI)
     const response = await stream.finalMessage();
     const text = extractText(response);
-    return parseResponse<ContentAnalysis>(text, ["synopsis", "segments", "keyTakeaways"]);
+    return parseResponse<ContentAnalysis>(text, ["synopsis", "keyTakeaways", "segments"]);
   }, "Content analysis");
 };
 

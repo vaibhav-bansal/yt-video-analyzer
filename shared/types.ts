@@ -53,12 +53,43 @@ export interface MetadataEvent {
   duration: string;
   publishedAt: string;
   url: string;
+  transcriptLanguage?: "en" | "hi";
 }
 
 export interface ContentEvent {
   synopsis: string;
   segments: SegmentSummary[];
   keyTakeaways: string[];
+}
+
+export interface SynopsisDeltaEvent {
+  delta: string;
+}
+
+export interface TakeawayDeltaEvent {
+  index: number;
+  delta: string;
+}
+
+export interface TakeawayCompleteEvent {
+  index: number;
+}
+
+export interface SegmentHeaderEvent {
+  index: number;
+  timestamp: string;
+  endTimestamp: string;
+  title: string;
+  startSeconds: number;
+}
+
+export interface SegmentDeltaEvent {
+  index: number;
+  delta: string;
+}
+
+export interface SegmentCompleteEvent {
+  index: number;
 }
 
 export interface ClaimsEvent {
@@ -82,6 +113,12 @@ export interface ErrorEvent {
 export interface SSEEventMap {
   metadata: MetadataEvent;
   content: ContentEvent;
+  synopsis_delta: SynopsisDeltaEvent;
+  takeaway_delta: TakeawayDeltaEvent;
+  takeaway_complete: TakeawayCompleteEvent;
+  segment_header: SegmentHeaderEvent;
+  segment_delta: SegmentDeltaEvent;
+  segment_complete: SegmentCompleteEvent;
   claims: ClaimsEvent;
   claimVerified: ClaimVerifiedEvent;
   complete: CompleteEvent;
