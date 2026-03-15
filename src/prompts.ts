@@ -1,9 +1,7 @@
 import { readFileSync } from "fs";
-import { resolve, dirname } from "path";
-import { fileURLToPath } from "url";
+import { resolve } from "path";
 
-const __dirname = dirname(fileURLToPath(import.meta.url));
-const promptsDir = resolve(__dirname, "..", "prompts");
+const promptsDir = resolve(process.cwd(), "prompts");
 
 const loadPrompt = (filename: string): string => {
   const raw = readFileSync(resolve(promptsDir, filename), "utf-8");
